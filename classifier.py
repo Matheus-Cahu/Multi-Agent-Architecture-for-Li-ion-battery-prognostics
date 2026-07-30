@@ -30,6 +30,21 @@ def carrega_norm(caminho):
     v = df.drop(columns=["time_s", "cycleNumber"]).values
     return torch.tensor(scaler.transform(v), dtype=torch.float32)  # transform, nao fit
 
+def non_maximum_supression(scores, T, S, k, largura=None):
+    if largura is None:
+        largura = T + S
+
+    scores = scores.copy()
+    selecionados = []
+    for _ in range(k):
+        i = int(np.argmax(scores))
+        if scores[i] < 0:
+            break
+        selecionados.append(i)
+        lo, hi = max(0, i - largura), min(len(scores), i + largura + 1)
+        scores[lo:hi] = -1
+    return selecionados
+
 # referencia saudavel: os baselines de treino, INICIO de vida (saudavel)
 ref_files = ["data/VAH01.csv", "data/VAH17.csv", "data/VAH27.csv"]
 res_ref = []
@@ -47,76 +62,54 @@ def escores(residuos):
     z = (residuos - mu_ref) / sig_ref
     return (z ** 2).sum(dim=(1, 2)).numpy()
 
+def payload_da_janela(serie, i, T, S):
+    """Extrai a assinatura de anomalia da janela que comeca no indice i."""
+    janela_in  = serie[i : i+T]                    # entrada [T, N]
+    with torch.no_grad():
+        prev = model(janela_in.unsqueeze(0))[0]    # previsto [S, N]
+    real = serie[i+T : i+T+S]                       # observado [S, N]
+    residuo = real - prev                           # [S, N]
+
+    z = (residuo - mu_ref) / sig_ref               # z por sensor e horizonte [S, N]
+    contrib = (z ** 2).sum(dim=0)                   # contribuicao de cada sensor [N]
+    return {
+        "indice": int(i),
+        "escore": float((z ** 2).sum()),
+        "contrib_por_sensor": contrib.numpy(),      # qual sensor puxou a anomalia
+        "z_medio_por_sensor": z.mean(dim=0).numpy() # sinal do desvio (+ ou -) por sensor
+    }
+
 limiar = np.percentile(escores(res_ref), 99)     # CONGELADO (regua unica)
 print(f"limiar unico (percentil 99 da referencia saudavel): {limiar:.1f}\n")
 
+COLUNAS = list(pd.read_csv("data/VAH01.csv", nrows=0)
+               .drop(columns=["time_s", "cycleNumber"]).columns)
+
 files = [f.name for f in Path("data/").iterdir() if f.is_file() and f.name != "README.txt"]
-# df = pd.concat((pd.read_csv(f) for f in files))
 
 for f in files:
-    print("Arquivo: ", f)
     serie = carrega_norm("data/" + f)
     loader = DataLoader(JanelaDataset(serie, T, S), batch_size=64)
     sc = escores(coletar_residuos(loader))
     taxa = (sc > limiar).mean()
-    print(f"{f:14s} | janelas anomalas: {100*taxa:.2f}%")
-    # df = pd.read_csv("data/"+ f)
-    # valores = df.drop(columns=["time_s", "cycleNumber"]).values   # numpy cru
-    # scaler = StandardScaler()
-    # data_norm = scaler.fit_transform(valores)                     # normaliza (numpy)
-    # data_norm = torch.tensor(data_norm, dtype=torch.float32)      # -> tensor
-    # T = 96   # comprimento da janela de entrada
-    # S = 24   # horizonte de previsão
-    # # split cronologico na SERIE LONGA, antes de janelar
-    # corte = int(len(data_norm) * 0.8)
-    # serie_treino = data_norm[:corte]
-    # serie_teste  = data_norm[corte:]
-    # # janelamento sob demanda (nao materializa X e Y na RAM)
-    # train_loader = DataLoader(JanelaDataset(serie_treino, T, S),
-    #                           batch_size=64, shuffle=True)
-    # test_loader  = DataLoader(JanelaDataset(serie_teste, T, S),
-    #                           batch_size=64)
-    # model = iTransformer(seq_len=T, pred_len=S, d_model=128, n_heads=4, n_blocks=2)
-    # model.load_state_dict(torch.load("itransformer_melhor.pth"))
-    # model.eval()
-    # def coletar_residuos(loader):
-    #     res = []
-    #     with torch.no_grad():
-    #         for xb, yb in loader:
-    #             res.append(yb - model(xb))
-    #     return torch.cat(res)
-    # res_ref = coletar_residuos(train_loader)
-    # mu_ref = res_ref.mean(dim=0)
-    # sig_ref = res_ref.std(dim=0)
-    # # calcula o escore de anomalia (soma dos z^2) de um conjunto de residuos
-    # def escores(residuos):
-    #     z = (residuos - mu_ref) / sig_ref
-    #     return (z ** 2).sum(dim=(1, 2)).numpy()   # [janelas]
-    # # limiar EMPIRICO: percentil dos escores saudaveis (treino)
-    # scores_ref = escores(res_ref)
-    # alpha = 0.01                                   # fracao de falsos positivos desejada
-    # limiar = np.percentile(scores_ref, 100 * (1 - alpha))   # p/ alpha=0.01 -> percentil 99
-    # # classifica o teste contra esse limiar
-    # scores_test = escores(coletar_residuos(test_loader))
-    # anomalias = scores_test > limiar
-    # print(f"limiar empirico (percentil {100*(1-alpha):.0f}): {limiar:.1f}")
-    # print(f"janelas sinalizadas: {anomalias.sum()} de {len(anomalias)} "
-    #       f"({100*anomalias.mean():.2f}%)")
-    # res_ref = coletar_residuos(train_loader)
-    # mu_ref = res_ref.mean(dim=0)
-    # sig_ref = res_ref.std(dim=0)
-    #
-    # def p_valores(residuos):
-    #     z = (residuos - mu_ref)/sig_ref
-    #     score = (z**2).sum(dim=(1,2)).numpy()
-    #     gl = z.shape[1] * z.shape[2]
-    #     return chi2.sf(score, df=gl)
-    #
-    # res_test = coletar_residuos(test_loader)
-    # p_test = p_valores(res_test)
-    #
-    # alpha = 0.01
-    # anomalias = p_test < alpha
-    # print(f"janelas sinalizadas: {anomalias.sum()} de {len(anomalias)} "
-    #       f"({100*anomalias.mean():.2f}%)")
 
+    # so seleciona picos que de fato passam o limiar
+    sc_filtrado = np.where(sc > limiar, sc, -1.0)
+    picos = non_maximum_supression(sc_filtrado, T, S, k=10)
+
+    print(f"{f:14s} | anomalas: {100*taxa:5.2f}% | eventos distintos (NMS): {len(picos)}")
+    for i in picos[:3]:                             # mostra os 3 principais
+        p = payload_da_janela(serie, i, T, S)
+        sensor_top = COLUNAS[int(p['contrib_por_sensor'].argmax())]
+        print(f"    idx {p['indice']:6d} | escore {p['escore']:7.1f} | dominado por: {sensor_top}")
+
+# # df = pd.concat((pd.read_csv(f) for f in files))
+#
+# for f in files:
+#     print("Arquivo: ", f)
+#     serie = carrega_norm("data/" + f)
+#     loader = DataLoader(JanelaDataset(serie, T, S), batch_size=64)
+#     sc = escores(coletar_residuos(loader))
+#     taxa = (sc > limiar).mean()
+#     non_maximum_supression(sc, T, S, k=)
+#     print(f"{f:14s} | janelas anomalas: {100*taxa:.2f}%")
