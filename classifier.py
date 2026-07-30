@@ -76,11 +76,17 @@ def payload_da_janela(serie, i, T, S):
 
     z = (residuo - mu_ref) / sig_ref               # z por sensor e horizonte [S, N]
     contrib = (z ** 2).sum(dim=0)                   # contribuicao de cada sensor [N]
+
+    media_dif  = residuo.mean(dim=0)                # media (real - prev) por sensor, COM sinal [N]
+    desvio_dif = residuo.std(dim=0)                 # desvio da diferenca por sensor [N]
+
     return {
         "indice": int(i),
         "escore": float((z ** 2).sum()),
         "contrib_por_sensor": contrib.numpy(),      # qual sensor puxou a anomalia
-        "z_medio_por_sensor": z.mean(dim=0).numpy() # sinal do desvio (+ ou -) por sensor
+        "z_medio_por_sensor": z.mean(dim=0).numpy(),# sinal do desvio em sigma (+ ou -) por sensor
+        "media_dif_por_sensor": media_dif.numpy(),  # media da diferenca real-prev por sensor
+        "desvio_dif_por_sensor": desvio_dif.numpy() # desvio padrao da diferenca por sensor
     }
 
 limiar = np.percentile(escores(res_ref), 99)     # CONGELADO (regua unica)
@@ -103,7 +109,9 @@ for f in files:
     picos = non_maximum_supression(sc_filtrado, T, S, k=10)
 
     print(f"{f:14s} | anomalas: {100*taxa:5.2f}% | eventos distintos (NMS): {len(picos)}| confiança: {100*trust:5.2f}%")
-    for i in picos:                             # mostra os 3 principais
+    for i in picos[:1]:                             # mostra os 3 principais
         p = payload_da_janela(serie, i, T, S)
         sensor_top = COLUNAS[int(p['contrib_por_sensor'].argmax())]
-        print(f"    idx {p['indice']:6d} | escore {p['escore']:7.1f} | dominado por: {sensor_top} ")
+        print(f"    idx {p['indice']:6d} | escore {p['escore']:7.1f} | dominado por: {sensor_top}")
+        for n, nome in enumerate(COLUNAS):
+            print(f"        {nome:20s} | dif media: {p['media_dif_por_sensor'][n]:+7.3f} | desvio: {p['desvio_dif_por_sensor'][n]:6.3f}")
