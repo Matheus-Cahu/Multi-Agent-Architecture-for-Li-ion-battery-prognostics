@@ -9,6 +9,7 @@ from modelos import iTransformer, JanelaDataset
 from scipy.stats import chi2
 from pathlib import Path
 import joblib
+import math
 
 T, S = 96, 24
 
@@ -62,6 +63,9 @@ def escores(residuos):
     z = (residuos - mu_ref) / sig_ref
     return (z ** 2).sum(dim=(1, 2)).numpy()
 
+def confianca(anomalia, k, c):
+    return 1/ (1 + math.exp(k * (anomalia - c)))
+
 def payload_da_janela(serie, i, T, S):
     """Extrai a assinatura de anomalia da janela que comeca no indice i."""
     janela_in  = serie[i : i+T]                    # entrada [T, N]
@@ -92,24 +96,14 @@ for f in files:
     loader = DataLoader(JanelaDataset(serie, T, S), batch_size=64)
     sc = escores(coletar_residuos(loader))
     taxa = (sc > limiar).mean()
+    trust = confianca(taxa, 219.7, 0.03)
 
     # so seleciona picos que de fato passam o limiar
     sc_filtrado = np.where(sc > limiar, sc, -1.0)
     picos = non_maximum_supression(sc_filtrado, T, S, k=10)
 
-    print(f"{f:14s} | anomalas: {100*taxa:5.2f}% | eventos distintos (NMS): {len(picos)}")
-    for i in picos[:3]:                             # mostra os 3 principais
+    print(f"{f:14s} | anomalas: {100*taxa:5.2f}% | eventos distintos (NMS): {len(picos)}| confiança: {100*trust:5.2f}%")
+    for i in picos:                             # mostra os 3 principais
         p = payload_da_janela(serie, i, T, S)
         sensor_top = COLUNAS[int(p['contrib_por_sensor'].argmax())]
-        print(f"    idx {p['indice']:6d} | escore {p['escore']:7.1f} | dominado por: {sensor_top}")
-
-# # df = pd.concat((pd.read_csv(f) for f in files))
-#
-# for f in files:
-#     print("Arquivo: ", f)
-#     serie = carrega_norm("data/" + f)
-#     loader = DataLoader(JanelaDataset(serie, T, S), batch_size=64)
-#     sc = escores(coletar_residuos(loader))
-#     taxa = (sc > limiar).mean()
-#     non_maximum_supression(sc, T, S, k=)
-#     print(f"{f:14s} | janelas anomalas: {100*taxa:.2f}%")
+        print(f"    idx {p['indice']:6d} | escore {p['escore']:7.1f} | dominado por: {sensor_top} ")
