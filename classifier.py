@@ -10,11 +10,12 @@ from scipy.stats import chi2
 from pathlib import Path
 import joblib
 import math
+import ollama
+import xml.etree.ElementTree as ET
 
 T, S = 96, 24
 
-# ---------- FORA DO LOOP: monta a regua UMA vez ----------
-scaler = joblib.load("scaler.pkl")            # o mesmo scaler do treino
+scaler = joblib.load("scaler.pkl")            
 model = iTransformer(seq_len=T, pred_len=S, d_model=128, n_heads=4, n_blocks=2)
 model.load_state_dict(torch.load("itransformer_melhor.pth"))
 model.eval()
@@ -29,7 +30,7 @@ def coletar_residuos(loader):
 def carrega_norm(caminho):
     df = pd.read_csv(caminho)
     v = df.drop(columns=["time_s", "cycleNumber"]).values
-    return torch.tensor(scaler.transform(v), dtype=torch.float32)  # transform, nao fit
+    return torch.tensor(scaler.transform(v), dtype=torch.float32)  
 
 def non_maximum_supression(scores, T, S, k, largura=None):
     if largura is None:
@@ -46,12 +47,11 @@ def non_maximum_supression(scores, T, S, k, largura=None):
         scores[lo:hi] = -1
     return selecionados
 
-# referencia saudavel: os baselines de treino, INICIO de vida (saudavel)
 ref_files = ["data/VAH01.csv", "data/VAH17.csv", "data/VAH27.csv"]
 res_ref = []
 for rf in ref_files:
     serie = carrega_norm(rf)
-    corte = int(len(serie) * 0.8)                # so a parte de treino
+    corte = int(len(serie) * 0.8)                
     loader = DataLoader(JanelaDataset(serie[:corte], T, S), batch_size=64)
     res_ref.append(coletar_residuos(loader))
 res_ref = torch.cat(res_ref)
@@ -89,6 +89,65 @@ def payload_da_janela(serie, i, T, S):
         "desvio_dif_por_sensor": desvio_dif.numpy() # desvio padrao da diferenca por sensor
     }
 
+def payload_para_texto(p, colunas):
+    linhas = []
+    for n, nome in enumerate(colunas):
+        media = p['media_dif_por_sensor'][n]
+        desvio = p['desvio_dif_por_sensor'][n]
+        linhas.append(f"- {nome}: desvio médio de {media:+.2f} (±{desvio:.2f}) em relação ao previsto")
+    return "\n".join(linhas)
+
+def payloads_para_texto(payloads, colunas):
+    """Concatena a assinatura de todos os picos, do mais severo ao menos severo."""
+    blocos = []
+    for ordem, p in enumerate(payloads, start=1):
+        sensor_top = colunas[int(p['contrib_por_sensor'].argmax())]
+        blocos.append(
+            f"Evento {ordem} (índice {p['indice']}, escore {p['escore']:.1f}, "
+            f"sensor dominante: {sensor_top}):\n"
+            f"{payload_para_texto(p, colunas)}"
+        )
+    return "\n\n".join(blocos)
+
+def extrair_secoes(caminho_xml, titulos_alvo):
+    """Extrai o texto das secoes cujo titulo contem um dos termos-alvo."""
+    tree = ET.parse(caminho_xml)
+    root = tree.getroot()
+    partes = []
+    for sec in root.iter("sec"):
+        t_el = sec.find("title")
+        titulo = "".join(t_el.itertext()) if t_el is not None else ""
+        if any(alvo.lower() in titulo.lower() for alvo in titulos_alvo):
+            partes.append("".join(sec.itertext()).strip())
+    return "\n\n".join(partes)
+
+def montar_prompt(nome_arquivo, taxa_anomalia, indice_conf, assinatura_texto, n_eventos):
+    corpus = extrair_secoes("corpus/energies-18-00342.xml",
+    ["3.1", "3.2"]        # testing/EOL + failure mechanisms
+)
+    print(len(corpus)//4, "tokens aprox")
+    return f"""Você é um assistente de análise de baterias de eVTOL. Os valores abaixo estão em unidades normalizadas (desvios-padrão), não em unidades físicas. Um desvio positivo significa que o sensor mediu acima do previsto por um modelo de bateria saudável; negativo, abaixo.
+
+Célula analisada: {nome_arquivo}
+Percentual de janelas anômalas: {100*taxa_anomalia:.2f}%
+Índice de conformidade: {100*indice_conf:.2f}%
+
+Assinaturas dos {n_eventos} eventos anômalos distintos detectados (supressão de não máximos), ordenados do mais severo para o menos severo:
+{assinatura_texto}
+
+Base de conhecimento específico de campo: {corpus}
+Formate os dados fornecidos para json, com um objeto por evento anômalo. Caso o coeficiente de confiança esteja baixo (abaixo de 80%), analise o problema fazendo uso do conhecimento específico de campo fornecido acima, considerando a evolução dos eventos ao longo dos índices."""
+
+def analisar(nome_arquivo, taxa, indice_conf, payloads, colunas):
+    assinatura = payloads_para_texto(payloads, colunas)
+    prompt = montar_prompt(nome_arquivo, taxa, indice_conf, assinatura, len(payloads))
+    resposta = ollama.chat(
+        model="gemma2:9b",
+        messages=[{"role": "user", "content": prompt}],
+        options={"temperature": 0}
+    )
+    return resposta["message"]["content"]
+
 limiar = np.percentile(escores(res_ref), 99)     # CONGELADO (regua unica)
 print(f"limiar unico (percentil 99 da referencia saudavel): {limiar:.1f}\n")
 
@@ -97,6 +156,8 @@ COLUNAS = list(pd.read_csv("data/VAH01.csv", nrows=0)
 
 files = [f.name for f in Path("data/").iterdir() if f.is_file() and f.name != "README.txt"]
 
+relatorio = ""
+
 for f in files:
     serie = carrega_norm("data/" + f)
     loader = DataLoader(JanelaDataset(serie, T, S), batch_size=64)
@@ -104,14 +165,37 @@ for f in files:
     taxa = (sc > limiar).mean()
     trust = confianca(taxa, 219.7, 0.03)
 
-    # so seleciona picos que de fato passam o limiar
     sc_filtrado = np.where(sc > limiar, sc, -1.0)
     picos = non_maximum_supression(sc_filtrado, T, S, k=10)
 
-    print(f"{f:14s} | anomalas: {100*taxa:5.2f}% | eventos distintos (NMS): {len(picos)}| confiança: {100*trust:5.2f}%")
-    for i in picos[:1]:                             # mostra os 3 principais
-        p = payload_da_janela(serie, i, T, S)
-        sensor_top = COLUNAS[int(p['contrib_por_sensor'].argmax())]
-        print(f"    idx {p['indice']:6d} | escore {p['escore']:7.1f} | dominado por: {sensor_top}")
-        for n, nome in enumerate(COLUNAS):
-            print(f"        {nome:20s} | dif media: {p['media_dif_por_sensor'][n]:+7.3f} | desvio: {p['desvio_dif_por_sensor'][n]:6.3f}")
+    if len(picos) == 0:                      # celula sem anomalias -> nada a analisar
+        print(f"{f}: sem eventos anômalos (conformidade {100*trust:.1f}%)")
+        continue
+
+    payloads = [payload_da_janela(serie, i, T, S) for i in picos]   # todos os eventos distintos
+    laudo = analisar(f, taxa, trust, payloads, COLUNAS)
+    print(f"\n===== {f} =====")
+    relatorio += (f"\n===== {f} =====")
+    print(laudo)
+    relatorio += (laudo)
+
+    with open("relatorio.txt", "a", encoding="utf-8") as file:
+        file.write(relatorio)
+# for f in files:
+#     serie = carrega_norm("data/" + f)
+#     loader = DataLoader(JanelaDataset(serie, T, S), batch_size=64)
+#     sc = escores(coletar_residuos(loader))
+#     taxa = (sc > limiar).mean()
+#     trust = confianca(taxa, 219.7, 0.03)
+#
+#     # so seleciona picos que de fato passam o limiar
+#     sc_filtrado = np.where(sc > limiar, sc, -1.0)
+#     picos = non_maximum_supression(sc_filtrado, T, S, k=10)
+#
+#     print(f"{f:14s} | anomalas: {100*taxa:5.2f}% | eventos distintos (NMS): {len(picos)}| confiança: {100*trust:5.2f}%")
+#     for i in picos[:1]:                             # mostra os 3 principais
+#         p = payload_da_janela(serie, i, T, S)
+#         sensor_top = COLUNAS[int(p['contrib_por_sensor'].argmax())]
+#         print(f"    idx {p['indice']:6d} | escore {p['escore']:7.1f} | dominado por: {sensor_top}")
+#         for n, nome in enumerate(COLUNAS):
+#             print(f"        {nome:20s} | dif media: {p['media_dif_por_sensor'][n]:+7.3f} | desvio: {p['desvio_dif_por_sensor'][n]:6.3f}")
