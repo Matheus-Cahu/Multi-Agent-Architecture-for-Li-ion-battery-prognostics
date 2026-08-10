@@ -36,9 +36,12 @@ export function valorCurto(chave, valor) {
   if (typeof valor === "boolean") return valor ? "sim" : "não";
   if (typeof valor === "number") {
     if (FRACAO.test(chave) && valor >= 0 && valor <= 1) {
-      const pct = valor * 100;
-      // conformidade pode vir muito perto de zero: 0,00% esconderia a ordem de grandeza
-      return pct > 0 && pct < 0.01 ? `${pct.toExponential(2)}%` : `${pct.toFixed(2)}%`;
+      // sempre em % com duas casas: valores muito perto de zero arredondam para 0,00%
+      const pct = (valor * 100).toLocaleString("pt-BR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+      return `${pct}%`;
     }
     return valor.toLocaleString("pt-BR", { maximumFractionDigits: 4 });
   }
