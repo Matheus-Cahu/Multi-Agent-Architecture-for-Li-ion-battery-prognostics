@@ -1,0 +1,24 @@
+{
+  "name": "chain",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "up": "./start.sh",
+    "down": "./start.sh --parar",
+    "chain": "hardhat node",
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.js --network localhost",
+    "start": "node --env-file=.env main.js",
+    "web": "npm --prefix web install && npm --prefix web run dev",
+    "web:build": "npm --prefix web install && npm --prefix web run build"
+  },
+  "dependencies": {
+    "ethers": "^6.17.0",
+    "express": "^4.22.2",
+    "mongodb": "^6.21.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.0"
+  }
+}

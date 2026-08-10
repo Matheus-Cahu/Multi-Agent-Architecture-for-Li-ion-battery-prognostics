@@ -1,0 +1,101 @@
+:root {
+  --bg: #f6f7f9;      --painel: #ffffff;   --borda: #e3e6ea;
+  --texto: #1a1d21;   --fraco: #6b7280;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ok: #0f7b3f;      --ok-bg: #e6f4ec;
+  --erro: #b3261e;    --erro-bg: #fdeceb;
+  --alerta: #8a5a00;  --alerta-bg: #fdf2dc;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a;     --painel: #1c2024;   --borda: #2e343b;
+    --texto: #e6e9ed;  --fraco: #9aa4b2;
+    --ok: #5fd68f;     --ok-bg: #14301f;
+    --erro: #ff8a80;   --erro-bg: #3a1a17;
+    --alerta: #f0c069; --alerta-bg: #33280f;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0; padding: 2rem 1.25rem;
+  background: var(--bg); color: var(--texto);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.5;
+}
+
+.container { max-width: 1000px; margin: 0 auto; }
+
+header {
+  display: flex; flex-wrap: wrap; gap: 1rem;
+  align-items: baseline; justify-content: space-between; margin-bottom: 1.5rem;
+}
+h1 { font-size: 1.35rem; margin: 0; }
+.sub { color: var(--fraco); font-size: .875rem; margin-top: .25rem; }
+.acoes { display: flex; gap: .5rem; align-items: center; }
+
+button {
+  font: inherit; font-size: .875rem; padding: .4rem .9rem; cursor: pointer;
+  background: var(--painel); color: var(--texto);
+  border: 1px solid var(--borda); border-radius: 6px;
+}
+button:hover { border-color: var(--fraco); }
+
+.resumo { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; font-size: .8125rem; }
+.pill { padding: .2rem .6rem; border-radius: 999px; border: 1px solid transparent; }
+.integro { background: var(--ok-bg);   color: var(--ok);   border-color: var(--ok); }
+.violado { background: var(--erro-bg); color: var(--erro); border-color: var(--erro); }
+.sem-ancora,
+.chain-indisponivel { background: var(--alerta-bg); color: var(--alerta); border-color: var(--alerta); }
+
+.lista { display: flex; flex-direction: column; gap: .5rem; }
+.card { background: var(--painel); border: 1px solid var(--borda); border-radius: 8px; overflow: hidden; }
+.card.violado-borda { border-color: var(--erro); }
+
+.cabecalho {
+  display: grid; grid-template-columns: 1fr auto auto; gap: .75rem; align-items: center;
+  width: 100%; padding: .75rem 1rem; text-align: left;
+  background: none; border: none; border-radius: 0; cursor: pointer;
+}
+.cabecalho:hover { background: color-mix(in srgb, var(--borda) 35%, transparent); }
+
+.id { font-family: var(--mono); font-size: .8125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.data { color: var(--fraco); font-size: .8125rem; white-space: nowrap; }
+
+.corpo { border-top: 1px solid var(--borda); padding: 1rem; }
+.campo { margin-bottom: .75rem; }
+.rotulo { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--fraco); margin-bottom: .2rem; }
+.valor { font-family: var(--mono); font-size: .8125rem; word-break: break-all; }
+
+pre {
+  margin: 0; padding: .75rem; background: var(--bg);
+  border: 1px solid var(--borda); border-radius: 6px;
+  font-family: var(--mono); font-size: .8125rem; overflow-x: auto;
+}
+
+/* ---------- relatorio formatado ---------- */
+.cabecalho-campo { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
+.alternar { padding: .15rem .5rem; font-size: .75rem; color: var(--fraco); }
+
+.metricas {
+  display: grid; gap: .5rem; margin-bottom: .75rem;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+.metrica { padding: .5rem .7rem; background: var(--bg); border: 1px solid var(--borda); border-radius: 6px; }
+.metrica .numero { font-family: var(--mono); font-size: .9375rem; word-break: break-word; }
+
+/* o laudo do SLM: prosa normal, sem quebra dura; o json cercado fica no <pre> */
+.laudo { font-size: .875rem; }
+.laudo p { margin: 0 0 .6rem; }
+.laudo ul { margin: 0 0 .6rem; padding-left: 1.15rem; }
+.laudo li { margin-bottom: .25rem; }
+.laudo pre { white-space: pre; margin-bottom: .6rem; }
+.laudo code {
+  font-family: var(--mono); font-size: .8125rem;
+  padding: .05rem .25rem; border-radius: 4px;
+  background: color-mix(in srgb, var(--borda) 45%, transparent);
+}
+.laudo > *:last-child { margin-bottom: 0; }
+
+.aviso { padding: .6rem .75rem; border-radius: 6px; margin-bottom: .75rem; font-size: .8125rem; }
+.vazio, .carregando { text-align: center; color: var(--fraco); padding: 3rem 1rem; }

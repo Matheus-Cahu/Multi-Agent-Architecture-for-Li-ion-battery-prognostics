@@ -1,0 +1,20 @@
+services:
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  hardhat:
+    image: node:20
+    user: "node"                  # uid 1000: nao vira dono root dos arquivos do host
+    working_dir: /chain
+    volumes:
+      - .:/chain                  # projeto hardhat (contrato + config) no host
+    command: sh -c "npm install && npx hardhat node --hostname 0.0.0.0"
+    ports:
+      - "8545:8545"               # RPC da rede local
+
+volumes:
+  mongo_data:

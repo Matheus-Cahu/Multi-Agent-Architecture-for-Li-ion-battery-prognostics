@@ -1,4 +1,5 @@
 import pandas as pd
+import requests
 import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
@@ -156,9 +157,9 @@ COLUNAS = list(pd.read_csv("data/VAH01.csv", nrows=0)
 
 files = [f.name for f in Path("data/").iterdir() if f.is_file() and f.name != "README.txt"]
 
-relatorio = ""
 
 for f in files:
+    relatorio = ""
     serie = carrega_norm("data/" + f)
     loader = DataLoader(JanelaDataset(serie, T, S), batch_size=64)
     sc = escores(coletar_residuos(loader))
@@ -174,13 +175,24 @@ for f in files:
 
     payloads = [payload_da_janela(serie, i, T, S) for i in picos]   # todos os eventos distintos
     laudo = analisar(f, taxa, trust, payloads, COLUNAS)
-    print(f"\n===== {f} =====")
-    relatorio += (f"\n===== {f} =====")
-    print(laudo)
-    relatorio += (laudo)
+    relatorio_celula = {
+        "celula": f,
+        "taxa_anomalia": float(taxa),
+        "indice_conformidade": float(trust),
+        "n_eventos": len(picos),
+        "laudo_slm": laudo,                    # o texto que o Gemma retornou
+    }
 
-    with open("relatorio.txt", "a", encoding="utf-8") as file:
-        file.write(relatorio)
+    try:
+        r = requests.post("http://localhost:3000/reports",
+                          json=relatorio_celula, timeout=30)
+        r.raise_for_status()
+        resp = r.json()
+        print(f"{f}: ancorado — reportId={resp['reportId']} tx={resp['txHash']}")
+    except Exception as e:
+        print(f"{f}: FALHA ao ancorar — {e}")
+
+
 # for f in files:
 #     serie = carrega_norm("data/" + f)
 #     loader = DataLoader(JanelaDataset(serie, T, S), batch_size=64)
